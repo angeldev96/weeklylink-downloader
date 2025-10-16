@@ -1,3 +1,7 @@
 node_modules
 downloads/
 .DS_Store
+working/*.pdf
+working/downloads/
+working/cache/
+working/logs/

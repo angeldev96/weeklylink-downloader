@@ -1,0 +1,38 @@
+{
+  "name": "issue-downloader",
+  "version": "1.0.0",
+  "description": "Issuu document downloader using Node.js with automatic caching and scheduling",
+  "main": "app.js",
+  "bin": {
+    "issue-downloader": "./app.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "cli": "node app.js",
+    "test": "node app.js https://issuu.com/thebpview/docs/issue_296",
+    "download-latest": "node -e \"require('./scheduler').runImmediateDownload()\""
+  },
+  "keywords": [
+    "issuu",
+    "pdf",
+    "downloader",
+    "nodejs",
+    "cli"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "engines": {
+    "node": ">=12.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "."
+  },
+  "dependencies": {
+    "axios": "^1.6.2",
+    "cheerio": "^1.0.0-rc.12",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "node-cron": "^3.0.3"
+  }
+}

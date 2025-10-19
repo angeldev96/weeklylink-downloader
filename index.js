@@ -92,12 +92,6 @@ async function downloadLatestIssue() {
         const success = await issuuDownloader.downloadDocument(issuuUrl);
         if (!success) throw new Error('Falló la descarga desde Issuu.');
 
-        // Update global lastDownloadedPdfUrl
-        if (issuuDownloader.lastPdfUrl) {
-            lastDownloadedPdfUrl = issuuDownloader.lastPdfUrl;
-            console.log('🔗 PDF URL guardada:', lastDownloadedPdfUrl);
-        }
-
         // Mantener solo el archivo más reciente (borra anteriores después de éxito)
         try {
             const files = fs.readdirSync(downloadsPath).filter(f => f.endsWith('.pdf'));
@@ -130,93 +124,73 @@ cron.schedule('0 1 * * *', () => {
     timezone: "America/New_York"
 });
 
-// Define the /download endpoint to serve the latest file
+// Define the /download endpoint to serve the latest file (usar sendFile como el repo que funciona)
 app.get('/download', (req, res) => {
     try {
         console.log('📥 Download request received');
-        console.log('📁 Downloads path:', downloadsPath);
         
-        // Check if directory exists
         if (!fs.existsSync(downloadsPath)) {
             console.error('❌ Downloads directory does not exist');
-            return res.status(500).send('Downloads directory not found');
+            return res.status(500).json({ error: 'Downloads directory not found' });
         }
         
         const allFiles = fs.readdirSync(downloadsPath);
-        console.log('📂 All files in directory:', allFiles);
+        const files = allFiles.filter(f => f.endsWith('.pdf') && !f.endsWith('.tmp'));
         
-        const files = allFiles.filter(f => !f.endsWith('.crdownload') && !f.endsWith('.tmp'));
-        console.log('✅ Valid files:', files);
-        
-        if (files.length > 0) {
-            const latest = files
-                .map(name => {
-                    const filePath = path.join(downloadsPath, name);
-                    return { name, time: fs.statSync(filePath).mtimeMs };
-                })
-                .sort((a, b) => b.time - a.time)[0].name;
-            
-            const latestFile = path.join(downloadsPath, latest);
-            console.log('📄 Serving file:', latestFile);
-            
-            // Verify file exists and is readable
-            if (!fs.existsSync(latestFile)) {
-                console.error('❌ File does not exist:', latestFile);
-                return res.status(404).send('File not found on disk');
-            }
-            
-            const stats = fs.statSync(latestFile);
-            const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
-            console.log('📊 File size:', fileSizeMB, 'MB');
-            
-            // Set proper headers for large file streaming
-            res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader('Content-Length', stats.size);
-            res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(latest)}"`);
-            res.setHeader('Accept-Ranges', 'bytes');
-            res.setHeader('Cache-Control', 'public, max-age=86400');
-            
-            // Stream the file instead of loading it all into memory
-            const fileStream = fs.createReadStream(latestFile);
-            
-            fileStream.on('error', (err) => {
-                console.error('❌ Stream error:', err);
-                if (!res.headersSent) {
-                    res.status(500).send('Error streaming file');
-                }
-            });
-            
-            fileStream.on('end', () => {
-                console.log('✅ File streamed successfully');
-            });
-            
-            fileStream.pipe(res);
-        } else {
-            console.warn('⚠️ No files available in downloads directory');
-            res.status(404).send('File not found. It may not have been downloaded yet.');
+        if (files.length === 0) {
+            console.warn('⚠️ No files available');
+            return res.status(404).json({ error: 'No file available yet' });
         }
+        
+        const latest = files
+            .map(name => ({ name, time: fs.statSync(path.join(downloadsPath, name)).mtimeMs }))
+            .sort((a, b) => b.time - a.time)[0].name;
+        
+        const latestFile = path.join(downloadsPath, latest);
+        console.log('📄 Serving file:', latestFile);
+        
+        if (!fs.existsSync(latestFile)) {
+            return res.status(404).json({ error: 'File not found' });
+        }
+        
+        const stats = fs.statSync(latestFile);
+        console.log('📊 File size:', (stats.size / 1024 / 1024).toFixed(2), 'MB');
+        
+        // Usar sendFile como en node-issue-downloader (más confiable que streams manuales)
+        res.sendFile(path.resolve(latestFile), {
+            headers: {
+                'Content-Disposition': `attachment; filename="${encodeURIComponent(latest)}"`,
+                'Content-Type': 'application/pdf',
+                'Content-Length': stats.size
+            }
+        }, (err) => {
+            if (err) {
+                console.error('❌ Error sending file:', err);
+                if (!res.headersSent) {
+                    res.status(500).json({ error: 'Error sending file' });
+                }
+            } else {
+                console.log('✅ File sent successfully');
+            }
+        });
     } catch (error) {
         console.error('💥 Error in /download endpoint:', error);
         if (!res.headersSent) {
-            res.status(500).send('Internal server error: ' + error.message);
+            res.status(500).json({ error: 'Internal server error: ' + error.message });
         }
     }
 });
-
-// Store the last successful download URL for redirect fallback
-let lastDownloadedPdfUrl = null;
 
 // Health check endpoint
 app.get('/health', (req, res) => {
     try {
         const files = fs.existsSync(downloadsPath) 
-            ? fs.readdirSync(downloadsPath).filter(f => !f.endsWith('.crdownload') && !f.endsWith('.tmp'))
+            ? fs.readdirSync(downloadsPath).filter(f => f.endsWith('.pdf') && !f.endsWith('.tmp'))
             : [];
         res.json({
             status: 'ok',
             downloadsPath,
             filesAvailable: files.length,
-            lastPdfUrl: lastDownloadedPdfUrl,
             files: files.map(name => {
                 const filePath = path.join(downloadsPath, name);
                 const stats = fs.statSync(filePath);
@@ -229,16 +203,6 @@ app.get('/health', (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ status: 'error', message: error.message });
-    }
-});
-
-// Redirect to the original PDF URL (useful if Railway can't serve large files)
-app.get('/download-redirect', (req, res) => {
-    if (lastDownloadedPdfUrl) {
-        console.log('🔗 Redirecting to:', lastDownloadedPdfUrl);
-        res.redirect(lastDownloadedPdfUrl);
-    } else {
-        res.status(404).json({ error: 'No PDF URL available yet. Try /download instead.' });
     }
 });
 

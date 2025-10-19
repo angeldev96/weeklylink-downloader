@@ -156,7 +156,7 @@ app.listen(port, () => {
     console.log('Scheduled download will run at 1 AM every day.');
 });
 
-// Optional: manual trigger endpoint
+// Optional: manual trigger endpoints
 app.get('/refresh', async (req, res) => {
     try {
         await downloadLatestIssue();

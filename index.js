@@ -126,24 +126,86 @@ cron.schedule('0 1 * * *', () => {
 
 // Define the /download endpoint to serve the latest file
 app.get('/download', (req, res) => {
-    const files = fs
-        .readdirSync(downloadsPath)
-        .filter(f => !f.endsWith('.crdownload'));
-    if (files.length > 0) {
-        const latest = files
-            .map(name => ({ name, time: fs.statSync(path.join(downloadsPath, name)).mtimeMs }))
-            .sort((a, b) => b.time - a.time)[0].name;
-        const latestFile = path.join(downloadsPath, latest);
-        res.download(latestFile, (err) => {
-            if (err) {
-                console.error('Error sending the file:', err);
-                if (!res.headersSent) {
-                    res.status(500).send('Error sending the file.');
-                }
+    try {
+        console.log('📥 Download request received');
+        console.log('📁 Downloads path:', downloadsPath);
+        
+        // Check if directory exists
+        if (!fs.existsSync(downloadsPath)) {
+            console.error('❌ Downloads directory does not exist');
+            return res.status(500).send('Downloads directory not found');
+        }
+        
+        const allFiles = fs.readdirSync(downloadsPath);
+        console.log('📂 All files in directory:', allFiles);
+        
+        const files = allFiles.filter(f => !f.endsWith('.crdownload') && !f.endsWith('.tmp'));
+        console.log('✅ Valid files:', files);
+        
+        if (files.length > 0) {
+            const latest = files
+                .map(name => {
+                    const filePath = path.join(downloadsPath, name);
+                    return { name, time: fs.statSync(filePath).mtimeMs };
+                })
+                .sort((a, b) => b.time - a.time)[0].name;
+            
+            const latestFile = path.join(downloadsPath, latest);
+            console.log('📄 Serving file:', latestFile);
+            
+            // Verify file exists and is readable
+            if (!fs.existsSync(latestFile)) {
+                console.error('❌ File does not exist:', latestFile);
+                return res.status(404).send('File not found on disk');
             }
+            
+            const stats = fs.statSync(latestFile);
+            console.log('📊 File size:', (stats.size / 1024 / 1024).toFixed(2), 'MB');
+            
+            res.download(latestFile, latest, (err) => {
+                if (err) {
+                    console.error('❌ Error sending the file:', err);
+                    if (!res.headersSent) {
+                        res.status(500).send('Error sending the file.');
+                    }
+                } else {
+                    console.log('✅ File sent successfully');
+                }
+            });
+        } else {
+            console.warn('⚠️ No files available in downloads directory');
+            res.status(404).send('File not found. It may not have been downloaded yet.');
+        }
+    } catch (error) {
+        console.error('💥 Error in /download endpoint:', error);
+        if (!res.headersSent) {
+            res.status(500).send('Internal server error: ' + error.message);
+        }
+    }
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+    try {
+        const files = fs.existsSync(downloadsPath) 
+            ? fs.readdirSync(downloadsPath).filter(f => !f.endsWith('.crdownload') && !f.endsWith('.tmp'))
+            : [];
+        res.json({
+            status: 'ok',
+            downloadsPath,
+            filesAvailable: files.length,
+            files: files.map(name => {
+                const filePath = path.join(downloadsPath, name);
+                const stats = fs.statSync(filePath);
+                return {
+                    name,
+                    size: `${(stats.size / 1024 / 1024).toFixed(2)} MB`,
+                    modified: new Date(stats.mtimeMs).toISOString()
+                };
+            })
         });
-    } else {
-        res.status(404).send('File not found. It may not have been downloaded yet.');
+    } catch (error) {
+        res.status(500).json({ status: 'error', message: error.message });
     }
 });
 

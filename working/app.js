@@ -15,6 +15,7 @@ class IssuuDownloader {
         this.apiUrl = 'https://backend.img2pdf.net/download-pdf';
         this.statusUrl = 'https://backend.img2pdf.net/job';
         this.outputDir = 'downloads';
+        this.lastPdfUrl = null; // Store the last downloaded PDF URL
     }
 
     /**
@@ -269,6 +270,7 @@ class IssuuDownloader {
             // If the file is already ready
             if (conversionResult.outputFile) {
                 console.log(`⬇️  Downloading PDF from: ${conversionResult.outputFile}`);
+                this.lastPdfUrl = conversionResult.outputFile; // Store URL
                 await this.downloadFile(conversionResult.outputFile, outputPath);
                 
                 const stats = fs.statSync(outputPath);
@@ -293,6 +295,7 @@ class IssuuDownloader {
                     
                     if (status.status === 'succeeded' && status.outputFile) {
                         console.log(`⬇️  Downloading PDF from: ${status.outputFile}`);
+                        this.lastPdfUrl = status.outputFile; // Store URL
                         await this.downloadFile(status.outputFile, outputPath);
                         
                         const stats = fs.statSync(outputPath);

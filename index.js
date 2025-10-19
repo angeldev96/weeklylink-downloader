@@ -92,6 +92,12 @@ async function downloadLatestIssue() {
         const success = await issuuDownloader.downloadDocument(issuuUrl);
         if (!success) throw new Error('Falló la descarga desde Issuu.');
 
+        // Update global lastDownloadedPdfUrl
+        if (issuuDownloader.lastPdfUrl) {
+            lastDownloadedPdfUrl = issuuDownloader.lastPdfUrl;
+            console.log('🔗 PDF URL guardada:', lastDownloadedPdfUrl);
+        }
+
         // Mantener solo el archivo más reciente (borra anteriores después de éxito)
         try {
             const files = fs.readdirSync(downloadsPath).filter(f => f.endsWith('.pdf'));
@@ -160,18 +166,31 @@ app.get('/download', (req, res) => {
             }
             
             const stats = fs.statSync(latestFile);
-            console.log('📊 File size:', (stats.size / 1024 / 1024).toFixed(2), 'MB');
+            const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
+            console.log('📊 File size:', fileSizeMB, 'MB');
             
-            res.download(latestFile, latest, (err) => {
-                if (err) {
-                    console.error('❌ Error sending the file:', err);
-                    if (!res.headersSent) {
-                        res.status(500).send('Error sending the file.');
-                    }
-                } else {
-                    console.log('✅ File sent successfully');
+            // Set proper headers for large file streaming
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Length', stats.size);
+            res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(latest)}"`);
+            res.setHeader('Accept-Ranges', 'bytes');
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+            
+            // Stream the file instead of loading it all into memory
+            const fileStream = fs.createReadStream(latestFile);
+            
+            fileStream.on('error', (err) => {
+                console.error('❌ Stream error:', err);
+                if (!res.headersSent) {
+                    res.status(500).send('Error streaming file');
                 }
             });
+            
+            fileStream.on('end', () => {
+                console.log('✅ File streamed successfully');
+            });
+            
+            fileStream.pipe(res);
         } else {
             console.warn('⚠️ No files available in downloads directory');
             res.status(404).send('File not found. It may not have been downloaded yet.');
@@ -184,6 +203,9 @@ app.get('/download', (req, res) => {
     }
 });
 
+// Store the last successful download URL for redirect fallback
+let lastDownloadedPdfUrl = null;
+
 // Health check endpoint
 app.get('/health', (req, res) => {
     try {
@@ -194,6 +216,7 @@ app.get('/health', (req, res) => {
             status: 'ok',
             downloadsPath,
             filesAvailable: files.length,
+            lastPdfUrl: lastDownloadedPdfUrl,
             files: files.map(name => {
                 const filePath = path.join(downloadsPath, name);
                 const stats = fs.statSync(filePath);
@@ -206,6 +229,16 @@ app.get('/health', (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ status: 'error', message: error.message });
+    }
+});
+
+// Redirect to the original PDF URL (useful if Railway can't serve large files)
+app.get('/download-redirect', (req, res) => {
+    if (lastDownloadedPdfUrl) {
+        console.log('🔗 Redirecting to:', lastDownloadedPdfUrl);
+        res.redirect(lastDownloadedPdfUrl);
+    } else {
+        res.status(404).json({ error: 'No PDF URL available yet. Try /download instead.' });
     }
 });
 

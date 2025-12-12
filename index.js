@@ -10,6 +10,16 @@ const cron = require('node-cron');
 const app = express();
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 
+// Global error handlers
+process.on('uncaughtException', (err) => {
+    console.error('❌ Uncaught Exception:', err);
+    console.error(err.stack);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 // Define the path for downloads
 const downloadsPath = path.join(__dirname, 'downloads');
 
@@ -237,6 +247,8 @@ app.listen(port, () => {
     console.log(`Server listening at http://localhost:${port}`);
     console.log('✅ Server ready!');
     console.log('📁 Downloads directory:', downloadsPath);
+    console.log('📁 Downloads directory (resolved):', path.resolve(downloadsPath));
+    console.log('📁 Downloads directory exists:', fs.existsSync(downloadsPath));
     
     // Check if there are existing files
     if (fs.existsSync(downloadsPath)) {
@@ -246,9 +258,14 @@ app.listen(port, () => {
         } else {
             console.log('⚠️  No files found - will download on first request');
         }
+    } else {
+        console.log('⚠️  Downloads directory does not exist - will be created on first request');
     }
     
     console.log('⏰ Scheduled download will run at 1 AM every day (America/New_York)');
+}).on('error', (err) => {
+    console.error('❌ Server error:', err);
+    process.exit(1);
 });
 
 // Optional: manual trigger endpoints

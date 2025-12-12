@@ -125,24 +125,39 @@ cron.schedule('0 1 * * *', () => {
 });
 
 // Define the /download endpoint to serve the latest file (usar sendFile como el repo que funciona)
-app.get('/download', (req, res) => {
+app.get('/download', async (req, res) => {
     try {
         console.log('📥 Download request received');
         
         if (!fs.existsSync(downloadsPath)) {
-            console.error('❌ Downloads directory does not exist');
-            return res.status(500).json({ error: 'Downloads directory not found' });
+            console.log('📁 Creating downloads directory');
+            fs.mkdirSync(downloadsPath, { recursive: true });
         }
         
         const allFiles = fs.readdirSync(downloadsPath);
         const files = allFiles.filter(f => f.endsWith('.pdf') && !f.endsWith('.tmp'));
         
+        // Si no hay archivos, descargar uno ahora
         if (files.length === 0) {
-            console.warn('⚠️ No files available');
-            return res.status(404).json({ error: 'No file available yet' });
+            console.log('⚠️ No files available, downloading now...');
+            try {
+                await downloadLatestIssue();
+                // Recheck after download
+                const newFiles = fs.readdirSync(downloadsPath).filter(f => f.endsWith('.pdf') && !f.endsWith('.tmp'));
+                if (newFiles.length === 0) {
+                    return res.status(500).json({ error: 'Failed to download file' });
+                }
+            } catch (downloadError) {
+                console.error('❌ Download failed:', downloadError);
+                return res.status(500).json({ error: 'Failed to download file: ' + downloadError.message });
+            }
         }
         
-        const latest = files
+        // Get latest file again
+        const allFilesAfter = fs.readdirSync(downloadsPath);
+        const filesAfter = allFilesAfter.filter(f => f.endsWith('.pdf') && !f.endsWith('.tmp'));
+        
+        const latest = filesAfter
             .map(name => ({ name, time: fs.statSync(path.join(downloadsPath, name)).mtimeMs }))
             .sort((a, b) => b.time - a.time)[0].name;
         

@@ -1,0 +1,15 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "npm start"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# Configuración para manejar archivos grandes
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+
+# Variables de entorno (opcional, puedes configurarlas en la UI también)
+[deploy.env]
+NODE_ENV = "production"

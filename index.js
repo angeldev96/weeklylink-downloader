@@ -124,7 +124,7 @@ cron.schedule('0 1 * * *', () => {
     timezone: "America/New_York"
 });
 
-// Define the /download endpoint to serve the latest file (usar sendFile como el repo que funciona)
+// Define the /download endpoint to serve the latest file with optimized streaming
 app.get('/download', async (req, res) => {
     try {
         console.log('📥 Download request received');
@@ -171,23 +171,34 @@ app.get('/download', async (req, res) => {
         const stats = fs.statSync(latestFile);
         console.log('📊 File size:', (stats.size / 1024 / 1024).toFixed(2), 'MB');
         
-        // Usar sendFile como en node-issue-downloader (más confiable que streams manuales)
-        res.sendFile(path.resolve(latestFile), {
-            headers: {
-                'Content-Disposition': `attachment; filename="${encodeURIComponent(latest)}"`,
-                'Content-Type': 'application/pdf',
-                'Content-Length': stats.size
-            }
-        }, (err) => {
-            if (err) {
-                console.error('❌ Error sending file:', err);
-                if (!res.headersSent) {
-                    res.status(500).json({ error: 'Error sending file' });
-                }
+        // Set headers for streaming
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Length', stats.size);
+        res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(latest)}"`);
+        res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+        res.setHeader('Accept-Ranges', 'bytes');
+        
+        // Use streaming for large files (más eficiente que sendFile para archivos grandes)
+        const stream = fs.createReadStream(latestFile, {
+            highWaterMark: 1024 * 1024 // 1MB chunks para mejor performance
+        });
+        
+        stream.on('error', (err) => {
+            console.error('❌ Stream error:', err);
+            if (!res.headersSent) {
+                res.status(500).json({ error: 'Error streaming file' });
             } else {
-                console.log('✅ File sent successfully');
+                res.end();
             }
         });
+        
+        stream.on('end', () => {
+            console.log('✅ File streamed successfully');
+        });
+        
+        // Pipe the file stream to response
+        stream.pipe(res);
+        
     } catch (error) {
         console.error('💥 Error in /download endpoint:', error);
         if (!res.headersSent) {
@@ -224,10 +235,20 @@ app.get('/health', (req, res) => {
 // Start the Express server
 app.listen(port, () => {
     console.log(`Server listening at http://localhost:${port}`);
-    // Trigger an initial download when the server starts
-    console.log('Running initial download...');
-    downloadLatestIssue().catch(() => console.warn('Initial download failed; will retry on schedule.'));
-    console.log('Scheduled download will run at 1 AM every day.');
+    console.log('✅ Server ready!');
+    console.log('📁 Downloads directory:', downloadsPath);
+    
+    // Check if there are existing files
+    if (fs.existsSync(downloadsPath)) {
+        const files = fs.readdirSync(downloadsPath).filter(f => f.endsWith('.pdf') && !f.endsWith('.tmp'));
+        if (files.length > 0) {
+            console.log(`📄 Found ${files.length} existing file(s)`);
+        } else {
+            console.log('⚠️  No files found - will download on first request');
+        }
+    }
+    
+    console.log('⏰ Scheduled download will run at 1 AM every day (America/New_York)');
 });
 
 // Optional: manual trigger endpoints
